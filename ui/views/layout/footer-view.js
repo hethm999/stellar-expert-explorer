@@ -1,7 +1,7 @@
 import React from 'react'
 import {BlockSelect, ThemeSelector} from '@stellar-expert/ui-framework'
 
-function Footer() {
+export default function Footer() {
     return <div className="footer">
         <div className="container text-center">
             <div>{new Date().getFullYear()}&nbsp;©&nbsp;StellarExpert <span className="dimmed">v{appVersion}</span>
@@ -14,6 +14,13 @@ function Footer() {
                     <i className="icon icon-github"/> Report a bug
                 </a>&emsp;
                 <ThemeSelector/>
+            </div>
+            <div>
+                <a href="/info/tos">Terms of use</a>&emsp;
+                <a href="/info/privacy">Privacy policy</a>&emsp;
+                <a href="https://stellarexpert.statuspage.io/" target="_blank" rel="noreferrer noopener" className="nowrap">
+                    Status
+                </a>
             </div>
             <div>
                 <a href="https://twitter.com/orbitlens" target="_blank" rel="noreferrer noopener" className="nowrap">
@@ -29,5 +36,3 @@ function Footer() {
         </div>
     </div>
 }
-
-export default Footer

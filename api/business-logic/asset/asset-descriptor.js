@@ -1,5 +1,4 @@
-const {StrKey} = require('stellar-sdk')
-const {isValidContractAddress} = require('../validators')
+const {StrKey, Asset} = require('@stellar/stellar-sdk')
 
 function normalizeType(code, type) {
     switch (type) {
@@ -17,15 +16,15 @@ const nativeAssetName = 'XLM'
 /**
  * Stellar Asset definition.
  */
-class Asset {
+class AssetDescriptor {
     /**
      * Creates an instance of the Asset
-     * @param {String|Asset} codeOrFullyQualifiedName - Asset code or fully qualified asset name in CODE-ISSUER-TYPE format.
+     * @param {String|AssetDescriptor} codeOrFullyQualifiedName - Asset code or fully qualified asset name in CODE-ISSUER-TYPE format.
      * @param {String} [type] - Asset type. One of ['credit_alphanum4', 'credit_alphanum12', 'native'].
      * @param {String} [issuer] - Asset issuer account public key.
      */
     constructor(codeOrFullyQualifiedName, type, issuer) {
-        if (codeOrFullyQualifiedName instanceof Asset) {
+        if (codeOrFullyQualifiedName instanceof AssetDescriptor) {
             //clone Asset
             ['code', 'type', 'issuer'].forEach(field => this[field] = codeOrFullyQualifiedName[field])
             return
@@ -36,7 +35,7 @@ class Asset {
             this.issuer = issuer
         } else if (codeOrFullyQualifiedName === nativeAssetName || type === 'native' || (codeOrFullyQualifiedName === 'XLM' && !type)) {
             this.type = 0
-        } else if (isValidContractAddress(codeOrFullyQualifiedName)) {
+        } else if (StrKey.isValidContract(codeOrFullyQualifiedName)) {
             this.type = 4
             this.contract = codeOrFullyQualifiedName
             return
@@ -111,27 +110,38 @@ class Asset {
     }
 
     /**
+     * @return {Asset}
+     */
+    toStellarAsset() {
+        if (this.type === 4)
+            throw new TypeError('Cannot convert contract to Stellar asset')
+        if (this.isNative)
+            return Asset.native()
+        return new Asset(this.code, this.issuer)
+    }
+
+    /**
      * Native asset type.
-     * @returns {Asset}
+     * @returns {AssetDescriptor}
      */
     static get native() {
-        return new Asset(nativeAssetName)
+        return new AssetDescriptor(nativeAssetName)
     }
 
     /**
      * Parses asset from Horizon API response
      * @param {Object} obj - Object to parse data from.
      * @param {String} prefix - Optional field names prefix.
-     * @returns {Asset}
+     * @returns {AssetDescriptor}
      */
     static parseAssetFromObject(obj, prefix = '') {
         const type = obj[prefix + 'asset_type']
         if (!type)
             throw new TypeError(`Invalid asset descriptor: ${JSON.stringify(obj)}. Prefix: ${prefix}`)
         if (type === 'native')
-            return Asset.native
-        return new Asset(obj[prefix + 'asset_code'], obj[prefix + 'asset_type'], obj[prefix + 'asset_issuer'])
+            return AssetDescriptor.native
+        return new AssetDescriptor(obj[prefix + 'asset_code'], obj[prefix + 'asset_type'], obj[prefix + 'asset_issuer'])
     }
 }
 
-module.exports = Asset
+module.exports = AssetDescriptor

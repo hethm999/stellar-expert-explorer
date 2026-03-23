@@ -6,7 +6,7 @@ async function fetchDomainMeta(network, domain) {
     validateNetwork(network)
     if (typeof domain !== 'string')
         throw errors.validationError('domain')
-    if (!/^[^/@\s]+$/.test(domain) || !/^[^:/,?*!&\s]{2,}\.[^:/,?*!&\s]{2,}/.test(domain))
+    if (!/^\S+\.[a-z]{2,}$/.test(domain))
         throw errors.validationError('domain', 'Invalid domain name')
 
     const m = await db[network].collection('domain_meta').findOne({_id: domain})
@@ -18,7 +18,7 @@ async function fetchDomainMeta(network, domain) {
         meta: m.meta || {}
     }
     if (m.tomlCid) {
-        res.tomlCid = m.tomlCid
+        res.toml_cid = m.tomlCid
     }
     if (m.interop) {
         res.interop = m.interop

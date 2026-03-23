@@ -1,5 +1,5 @@
-const {Long} = require('bson')
 const db = require('../../connectors/mongodb-connector')
+const errors = require('../errors')
 const ArchiveTxInfo = require('./archive-tx-info')
 const ArchiveLedgerInfo = require('./archive-ledger-info')
 
@@ -9,7 +9,7 @@ const ArchiveLedgerInfo = require('./archive-ledger-info')
  * @return {Collection}
  * @private
  */
-function collection(network, collectionName) {
+function archiveCollection(network, collectionName) {
     return db.archive[network].collection(collectionName)
 }
 
@@ -36,14 +36,52 @@ function mapLedgerProps(entry) {
 /**
  * Fetch multiple transactions from archive
  * @param {String} network - Network identifier
- * @param {Long[]} ids - Transaction identifiers
+ * @param {Number} sequence - Ledger sequence
+ * @return {Promise<{}>}
+ */
+async function fetchArchiveLedger(network, sequence) {
+    const ledger = await archiveCollection(network, 'ledgers')
+        .findOne({_id: parseInt(sequence)})
+    if (!ledger)
+        return errors.notFound('Ledger not found')
+    const res = {
+        sequence,
+        xdr: ledger.xdr.toString('base64')
+    }
+    if (ledger.upgrades) {
+        res.upgrades = ledger.upgrades.map(u => u.toString('base64'))
+    }
+    return res
+}
+
+/**
+ * Fetch multiple transactions from archive
+ * @param {String} network - Network identifier
+ * @param {Number} from - Starting sequence
+ * @param {Number} count - Number of ledgers to fetch
+ * @return {Promise<{}>}
+ */
+async function fetchArchiveLedgers(network, from, count) {
+    const ledgers = await archiveCollection(network, 'ledgers')
+        .find({_id:{$gte: from}}, {sort: {_id: 1}, limit: count}).toArray()
+    return ledgers.map(ledger => ({
+        sequence: ledger._id,
+        xdr: ledger.xdr.toString('base64'),
+        upgardes: !!ledger.upgrades
+    }))
+}
+
+/**
+ * Fetch multiple transactions from archive
+ * @param {String} network - Network identifier
+ * @param {BigInt[]} ids - Transaction identifiers
  * @param {Number} order - Transactions sorting order
  * @return {Promise<ArchiveTxInfo[]>}
  */
 async function fetchArchiveTransactions(network, ids, order = -1) {
     if (!ids?.length)
         return []
-    const res = await collection(network, 'transactions')
+    const res = await archiveCollection(network, 'transactions')
         .find({_id: {$in: ids}}, {sort: {_id: order}})
         .toArray()
     return res.map(mapTxProps)
@@ -52,7 +90,7 @@ async function fetchArchiveTransactions(network, ids, order = -1) {
 /**
  * Fetch a single transaction from archive db
  * @param {String} network - Network identifier
- * @param {String|Long|Buffer} idOrHash - Transaction id or hash
+ * @param {String|BigInt|Buffer} idOrHash - Transaction id or hash
  * @return {Promise<ArchiveTxInfo>}
  */
 async function fetchSingleArchiveTransaction(network, idOrHash) {
@@ -64,18 +102,18 @@ async function fetchSingleArchiveTransaction(network, idOrHash) {
             query.hash = Buffer.from(idOrHash, 'hex')
         } else {
             try {
-                query._id = Long.fromString(idOrHash, false, 10)
+                query._id = BigInt(idOrHash)
             } catch (e) {
                 return null
             }
         }
-    } else if (idOrHash instanceof Long) {
+    } else if (typeof idOrHash === 'bigint') {
         query._id = idOrHash
     } else if (idOrHash instanceof Buffer) {
         query.hash = idOrHash
     } else
         return null //unknown format
-    const res = await collection(network, 'transactions').findOne(query)
+    const res = await archiveCollection(network, 'transactions').findOne(query)
     if (!res)
         return null
     return mapTxProps(res)
@@ -84,17 +122,36 @@ async function fetchSingleArchiveTransaction(network, idOrHash) {
 /**
  * Fetch all transaction that belong to a certain ledger from archive db
  * @param {String} network - Network identifier
- * @param {Number} ledger - Ledger sequence
+ * @param {Number||Number[]} ledger - Ledger sequence
  * @param {Number} [order] - Transactions sorting order
  * @return {Promise<ArchiveTxInfo[]>}
  */
 async function fetchArchiveLedgerTransactions(network, ledger, order = 1) {
     if (typeof ledger !== 'number' || !(ledger > 0))
         return []
-    const res = await collection(network, 'transactions')
-        .find({_id: {$gte: new Long(0, ledger), $lt: new Long(0, ledger + 1)}}, {sort: {_id: order}})
+    let minLedger, maxLedger
+    if (ledger instanceof Array) {
+        const sorted = ledger.slice().sort()
+        minLedger = sorted[0].sequence
+        maxLedger = sorted[sorted.length - 1].sequence
+    } else {
+        minLedger = ledger
+        maxLedger = ledger
+    }
+    const filter = {
+        $gte: BigInt(minLedger) << 32n,
+        $lt: BigInt(maxLedger + 1) << 32n
+    }
+    const res = await archiveCollection(network, 'transactions')
+        .find({_id: filter}, {sort: {_id: order}})
         .toArray()
     return res.map(mapTxProps)
 }
 
-module.exports = {fetchArchiveTransactions, fetchArchiveLedgerTransactions, fetchSingleArchiveTransaction}
+module.exports = {
+    fetchArchiveTransactions,
+    fetchArchiveLedgerTransactions,
+    fetchSingleArchiveTransaction,
+    fetchArchiveLedger,
+    fetchArchiveLedgers
+}

@@ -5,7 +5,8 @@ import {exportGridData} from '../../util/grid-data-exporter'
 import './grid-data-actions.scss'
 
 function locateParentGrid(container) {
-    return (container || document).getElementsByClassName('exportable')[0]
+    return (container || document).getElementsByClassName('exportable')[0] ||
+        (container || document).getElementsByTagName('table')[0]
 }
 
 export default function GridDataActions({model, allowExport = true}) {
@@ -13,6 +14,8 @@ export default function GridDataActions({model, allowExport = true}) {
     const navigate = useCallback(function (page) {
         model.load(page)
             .then(() => {
+                if (!container.current)
+                    return null
                 const grid = locateParentGrid(container.current.parentElement)
                 grid.parentElement.scrollIntoView({behavior: 'smooth'})
             })

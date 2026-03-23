@@ -1,9 +1,14 @@
 import React, {useState} from 'react'
 import {Dropdown} from '@stellar-expert/ui-framework'
-import NetworkSwitchView from './network-switch-view'
+import {resolvePath} from '../../business-logic/path'
 import SearchBoxView from '../explorer/search/search-box-view'
 import LoginStatus from '../components/login-status'
-import {resolvePath} from '../../business-logic/path'
+import NetworkSwitchView from './network-switch-view'
+
+const dex = [
+    {title: 'DEX Markets', href: resolvePath('market')},
+    {title: 'Classic Liquidity Pools', href: resolvePath('liquidity-pool')},
+]
 
 const services = [
     {title: 'Accounts Directory', href: resolvePath('', 'directory')},
@@ -11,9 +16,10 @@ const services = [
     {title: 'Payment Locator', href: resolvePath('payment-locator')},
     {title: 'Operations Live Stream', href: resolvePath('operations-live-stream')},
     {title: 'Account Demolisher', href: resolvePath('', 'demolisher')},
-    {title: 'Tax Data Export', href: resolvePath('', 'tax-export')},
-    {title: 'Protocol Versions History', href: resolvePath('protocol-history')}
-//{title: 'Account Demolisher', href: resolvePath('', 'demolisher')}
+    {title: 'Tax Data Export', href: "https://ledgers.tax/"},
+    {title: 'Protocol Versions History', href: resolvePath('protocol-history')},
+    {title: 'Asset Lists Catalogue', href: '/asset-lists'}
+    //{title: 'Account Demolisher', href: resolvePath('', 'demolisher')}
 ]
 
 export default function TopMenuView() {
@@ -29,19 +35,21 @@ export default function TopMenuView() {
             </a>
             <div className={`nav-menu-dropdown ${menuVisible && 'active'}`}>
                 <div className="main-menu top-menu-block" onClick={e => setMenuVisible(false)}>
-                    <a href={resolvePath('asset')}>Assets</a>
-                    <a href={resolvePath('market')}>Markets</a>
-                    <a href={resolvePath('liquidity-pool')}>Liquidity Pools</a>
                     <a href={resolvePath('network-activity')}>Network Stats</a>
+                    <a href={resolvePath('asset')}>Assets</a>
+                    <Dropdown title="Markets" className="desktop-only" options={dex}/>
                     <Dropdown title="Services" className="desktop-only" options={services}/>
+                    <a href={resolvePath('market')} className="mobile-only">DEX Markets</a>
+                    <a href={resolvePath('liquidity-pool')} className="mobile-only">Classic Liquidity Pools</a>
                     <a href="/blog">Blog</a>
                     <hr className="mobile-only"/>
                     <a href={resolvePath('', 'directory')} className="mobile-only">Accounts Directory</a>
                     <a href={resolvePath('', 'directory/blocked-domains')} className="mobile-only">Domains BlockList</a>
                     <a href={resolvePath('payment-locator')} className="mobile-only">Payment Locator</a>
                     <a href={resolvePath('operations-live-stream')} className="mobile-only">Operations Live Stream</a>
-                    <a href={resolvePath('tax-export')} className="mobile-only">Tax Data Export</a>
+                    <a href="https://ledgers.tax/" target="_blank" className="mobile-only">Tax Data Export</a>
                     <a href={resolvePath('protocol-history')} className="mobile-only">Protocol Versions History</a>
+                    <a href="/asset-lists" className="mobile-only">Asset Lists Catalogue</a>
                 </div>
                 <div className="top-menu-block right" style={{float: 'right'}}>
                     <LoginStatus/>

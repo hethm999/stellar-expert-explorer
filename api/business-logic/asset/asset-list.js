@@ -1,9 +1,19 @@
+const {Asset, Networks} = require('@stellar/stellar-sdk')
 const db = require('../../connectors/mongodb-connector')
 const QueryBuilder = require('../query-builder')
-const {normalizeOrder, preparePagedData, addPagingToken, calculateSequenceOffset, normalizeLimit} = require('../api-helpers')
-const {resolveAccountId} = require('../account/account-resolver')
-const {validateNetwork, isValidAccountAddress} = require('../validators')
-const {anyToNumber} = require('../../utils/formatter')
+const {
+    normalizeOrder,
+    preparePagedData,
+    addPagingToken,
+    calculateSequenceOffset,
+    normalizeLimit
+} = require('../api-helpers')
+const {validateNetwork, isValidAccountAddress, isValidContractAddress} = require('../validators')
+const AssetDescriptor = require('./asset-descriptor')
+const {combineAssetHistory} = require('./asset-aggregation')
+const {estimateAssetPrices} = require('./asset-price')
+const {aggregateAssetSupply} = require('./asset-supply')
+const {retrieveAssetContractsMeta} = require('./asset-meta-resolver')
 
 const supportedFeaturesSearch = [{
     terms: ['SEP3', 'SEP0003', 'SEP-0003', 'AUTH_SERVER'],
@@ -23,51 +33,54 @@ const supportedFeaturesSearch = [{
 }, {
     terms: ['SEP31', 'SEP0031', 'SEP-0031', 'DIRECT_PAYMENT_SERVER'],
     filter: 'sep31'
+}, {
+    terms: ['SEP41', 'SEP0041', 'SEP-0041', 'TOKEN'],
+    filter: 'sep41'
 }]
 
 const projection = {
-    name: 1,
     created: 1,
-    trades: 1,
-    tradedAmount: 1,
-    payments: 1,
-    paymentsAmount: 1,
-    supply: 1,
-    trustlines: 1,
-    price: 1,
-    volume: 1,
     volume7d: 1,
     price7d: 1,
     rating: 1,
     domain: 1,
-    tomlInfo: 1
+    tomlInfo: 1,
+    history: 1
 }
 
-function mapAssetProps(assets, network) {
-    return assets.map(({
-                           _id,
-                           supply,
-                           name,
-                           tradedAmount,
-                           paymentsAmount,
-                           lastPrice,
-                           price,
-                           baseVolume,
-                           volume,
-                           quoteVolume,
-                           totalTrades,
-                           trades,
-                           ...other
-                       }) => ({
-        asset: name,
-        supply: anyToNumber(supply),
-        traded_amount: tradedAmount,
-        payments_amount: paymentsAmount,
-        trades: totalTrades,
-        price: lastPrice,
-        volume: quoteVolume,
-        ...other
-    }))
+async function mapAssetProps(network, assets) {
+    const ids = assets.map(a => a._id)
+    const [prices, supply] = await Promise.all([
+        estimateAssetPrices(network, ids),
+        aggregateAssetSupply(network, ids)])
+
+    assets = assets.map(({_id, baseVolume, quoteVolume, history, ...other}) => {
+        const props = combineAssetHistory(history, _id !== 'XLM')
+        return {
+            asset: _id,
+            supply: supply[_id] || 0n,
+            traded_amount: props.tradedAmount,
+            payments_amount: props.paymentsAmount,
+            payments: props.payments,
+            trades: props.trades,
+            trustlines: props.trustlines,
+            price: prices?.get(_id) || 0,
+            volume: quoteVolume,
+            ...other
+        }
+    })
+
+    const contracts = ids.filter(id => id.length === 56 && id.startsWith('C'))
+    if (contracts.length) {
+        const mapped = await retrieveAssetContractsMeta(network, contracts)
+        for (const record of assets) {
+            const contractInfo = mapped.get(record.asset)
+            if (contractInfo) {
+                Object.assign(record, contractInfo)
+            }
+        }
+    }
+    return assets
 }
 
 async function queryAllAssets(network, basePath, {search, sort, order, cursor, limit, includeUninitialized}) {
@@ -76,7 +89,7 @@ async function queryAllAssets(network, basePath, {search, sort, order, cursor, l
     if (sort === 'created')
         return await queryAllAssetsByCreatedDate(network, basePath, cursor, limit, order, includeUninitialized)
 
-    const q = new QueryBuilder({payments: {$gt: 0}})
+    const q = new QueryBuilder({'rating.average': {$gt: 0}})
         .setSkip(calculateSequenceOffset(0, limit, cursor, order))
         .setLimit(limit, 50)
 
@@ -105,17 +118,26 @@ async function queryAllAssets(network, basePath, {search, sort, order, cursor, l
     }
     sortOrder._id = 1
 
-
     search = (search || '').trim() //cleanup spaces
     let assets
     let isTextSearch = false
     if (search) {
         //check whether search is an account address
         if (isValidAccountAddress(search)) {
-            const issuer = await resolveAccountId(network, search)
-            if (!issuer)
-                return preparePagedData(basePath, {sort, order, cursor: q.skip, limit: q.limit}, [])
-            q.addQueryFilter({issuer})
+            q.addQueryFilter({issuer: search})
+        } else if (isValidContractAddress(search)) {
+            const contractInfo = await db[network].collection('contracts').findOne({_id: search},
+                {projection: {code: 1, issuer: 1, traits: 1}})
+            if (contractInfo) {
+                if (contractInfo.traits?.includes('sep41')) { //SEP41 token
+                    q.addQueryFilter({_id: search})
+                } else if (contractInfo.code) { //SAC contract
+                    const _id = new AssetDescriptor(!contractInfo.issuer ? 'XLM' : `${contractInfo.code}-${contractInfo.issuer}`).toFQAN()
+                    q.addQueryFilter({_id})
+                } else {
+                    q.addQueryFilter({_id: null}) //force empty result
+                }
+            }
         } else {
             //check if it's a search by features
             const asFeatureName = search.toUpperCase()
@@ -150,7 +172,7 @@ async function queryAllAssets(network, basePath, {search, sort, order, cursor, l
             .toArray()
     }
 
-    assets = mapAssetProps(assets, network)
+    assets = await mapAssetProps(network, assets)
 
     addPagingToken(assets, q.skip)
 
@@ -163,13 +185,13 @@ async function queryAllAssets(network, basePath, {search, sort, order, cursor, l
 
 async function queryAllAssetsByCreatedDate(network, basePath, cursor, limit, order, includeUninitialized = false) {
     order = normalizeOrder(order)
-    const q = new QueryBuilder(includeUninitialized ? {} : {payments: {$gt: 0}})
-        .setSort('_id', order, -1)
+    const q = new QueryBuilder(includeUninitialized ? {} : {'rating.average': {$gt: 0}})
+        .setSort('created', order, 1)
         .setLimit(limit, 50)
 
     const idCursor = parseInt(cursor, 10)
     if (idCursor) {
-        q.query = {_id: {[order === 1 ? '$gt' : '$lt']: idCursor}, ...q.query}
+        q.query = {created: {[order === 1 ? '$gt' : '$lt']: idCursor}, ...q.query}
     }
 
     let assets = await db[network].collection('assets')
@@ -180,11 +202,59 @@ async function queryAllAssetsByCreatedDate(network, basePath, cursor, limit, ord
         .toArray()
 
     for (const a of assets) {
-        a.paging_token = a._id
+        a.paging_token = a.created
     }
-    assets = mapAssetProps(assets, network)
+    assets = await mapAssetProps(network, assets)
 
     return preparePagedData(basePath, {sort: 'created', order, cursor: q.skip, limit: q.limit}, assets)
 }
 
-module.exports = {queryAllAssets}
+async function querySAL(network, limit = 50) {
+    const assets = await db[network].collection('assets')
+        .find({})
+        .sort({'rating.average': -1})
+        .skip(1)
+        .limit(limit)
+        .project({tomlInfo: 1, domain: 1})
+        .toArray()
+
+    return {
+        name: 'StellarExpert Top 50',
+        provider: 'StellarExpert',
+        description: 'Dynamically generated list based on technical asset metrics, including payments and trading volumes, interoperability, userbase, etc. Assets included in this list were not verified by StellarExpert team. StellarExpert is not affiliated with issuers, and does not endorse or advertise assets in the list. Assets reported for fraudulent activity removed from the list automatically.',
+        version: '1.0',
+        network,
+        feedback: 'https://stellar.expert',
+        assets: assets.map(a => {
+            if (a._id.length === 56 && a._id[0] === 'C') { //wasm contract
+                return {
+                    contract: a._id,
+                    name: cleanupString(a.tomlInfo?.name || a._id),
+                    org: cleanupString(a.tomlInfo?.orgName || 'unknown'),
+                    domain: a.domain || undefined,
+                    icon: a.tomlInfo?.image || undefined
+                }
+            } else {
+                const [code, issuer] = a._id.split('-')
+                return {
+                    code,
+                    issuer,
+                    contract: new Asset(code, issuer).contractId(Networks[network.toUpperCase()]),
+                    name: cleanupString(a.tomlInfo?.name || code),
+                    org: cleanupString(a.tomlInfo?.orgName || 'unknown'),
+                    domain: a.domain || undefined,
+                    icon: a.tomlInfo?.image || undefined,
+                    decimals: 7
+                }
+            }
+        })
+    }
+}
+
+function cleanupString(value) {
+    if (!value)
+        return undefined
+    return value.replace(/[^\w\u0020.,-@]*/g, '')
+}
+
+module.exports = {queryAllAssets, querySAL}

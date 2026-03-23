@@ -1,5 +1,5 @@
 import React from 'react'
-import {StrKey} from 'stellar-base'
+import {StrKey} from '@stellar/stellar-base'
 import {AccountAddress, UtcTimestamp, parseMuxedAccount, useExplorerApi} from '@stellar-expert/ui-framework'
 import {formatPrice} from '@stellar-expert/formatter'
 import {resolvePath} from '../../../business-logic/path'
@@ -15,28 +15,31 @@ export default function AccountSearchResultsView({term, onLoaded}) {
         accountAddress = parseMuxedAccount(term).address
     }
     const response = useExplorerApi('account?search=' + encodeURIComponent(accountAddress))
-    if (!response.loaded) return null
+    if (!response.loaded)
+        return null
     const {records} = response?.data?._embedded || {}
     //onLoaded(response.data)
     if (!records?.length) {
         onLoaded(null)
         return null
     }
-    const results = records.map(({account, created, trades=0, payments=0, deleted}) => {
-        const address = account === accountAddress ? term : account //replace result for a muxed account
+    const results = records.map(({address, created, trades = 0, payments = 0, deleted}) => {
+        const key = address === accountAddress ? term : address //replace result for a muxed account
+        const isContract = key.startsWith('C')
         return {
-            link: resolvePath(`account/${address}`),
-            title: <>Account <AccountAddress account={address} link={false} chars={12}/>{deleted &&
-                <span className="details">(deleted)</span>}</>,
+            link: resolvePath(`${isContract ? 'contract' : 'account'}/${key}`),
+            title: <>{isContract ? 'Contract' : 'Account'} <AccountAddress account={key} link={false} chars={12}/>
+                {!!deleted && <span className="details">(deleted)</span>}</>,
             description: <>
                 {created > 0 ? <>Created&nbsp;<UtcTimestamp date={created} dateOnly/></> : <>Signing key</>}{' | '}
-                {formatPrice(payments)}&nbsp;payments{', '}
-                {formatPrice(trades)}&nbsp;trades
+                {payments > 0 && <>{formatPrice(payments)}&nbsp;payments</>}
+                {payments > 0 && trades > 0 && ', '}
+                {trades > 0 && <>{formatPrice(trades)}&nbsp;trades</>}
             </>,
             links: <>
-                <a href={formatLink(account)}>Transactions history</a>&emsp;
-                <a href={formatLink(account, 'trades')}>Trades history</a>&emsp;
-                <a href={formatLink(account, 'active-offers')}>Active DEX offers</a>
+                <a href={formatLink(address)}>Transactions history</a>&emsp;
+                <a href={formatLink(address, 'trades')}>Trades history</a>&emsp;
+                <a href={formatLink(address, 'active-offers')}>Active DEX offers</a>
             </>
         }
     })

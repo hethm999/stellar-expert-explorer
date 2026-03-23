@@ -1,16 +1,10 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react'
+import React, {useEffect, useRef, useState} from 'react'
 import {throttle} from 'throttle-debounce'
-import {
-    ElapsedTime,
-    TxLink,
-    TxOperationsList,
-    parseTxDetails,
-    useStellarNetwork,
-    loadTransactions,
-    streamTransactions
-} from '@stellar-expert/ui-framework'
-import './activity-stream.scss'
+import {ElapsedTime, TxLink, TxOperationsList} from '@stellar-expert/ui-framework'
+import {parseTxDetails, useStellarNetwork, loadLedgerTransactions, usePageMetadata, ledgerStream} from '@stellar-expert/ui-framework'
 import appSettings from '../../../app-settings'
+import ErrorNotificationBlock from '../../components/error-notification-block'
+import './activity-stream.scss'
 
 export default function ActivityStreamView() {
     const network = useStellarNetwork()
@@ -19,8 +13,6 @@ export default function ActivityStreamView() {
     const [includeFailed, setIncludeFailed] = useState(false)
     const [_, refresh] = useState(0)
     const activityContainer = useRef()
-
-    const toggleIncludeFailed = useCallback(() => setIncludeFailed(prev => !prev), [])
 
     useEffect(() => {
         if (!activityContainer.current)
@@ -51,20 +43,24 @@ export default function ActivityStreamView() {
         activityContainer.current.addEventListener('scroll', scrollHandler)
         return () => {
             activity.stopStreaming()
-            activityContainer.current.removeEventListener('scroll', scrollHandler)
+            activityContainer.current?.removeEventListener('scroll', scrollHandler)
         }
     }, [network, includeFailed])
+
+    usePageMetadata({
+        title: `Recent activity on Stellar ${appSettings.activeNetwork} network`,
+        description: `Live transactions feed for Stellar ${appSettings.activeNetwork} network.`
+    })
+
+    if (activity?.isFetchError) {
+        return <ErrorNotificationBlock>
+            Failed to fetch Activity Live Stream.
+        </ErrorNotificationBlock>
+    }
 
     return <div className="container narrow">
         <h2>Activity Live Stream</h2>
         <div className="segment blank activity-stream">
-            <div className="column column-67">
-            </div>
-            <div className="desktop-right dimmed">
-                <label className="text-small">
-                    <input type="checkbox" onChange={toggleIncludeFailed} checked={includeFailed}/> Show failed transactions
-                </label>
-            </div>
             <hr className="flare"/>
             <ul ref={activityContainer}>
                 {activity?.records.map(tx => <li key={tx.txHash}>
@@ -101,7 +97,7 @@ class RecentActivity {
      */
     network = 'public'
     /**
-     * Recent tansactions history
+     * Recent transactions history
      * @type {Array<ParsedTxDetails>}
      * @readonly
      */
@@ -140,6 +136,8 @@ class RecentActivity {
 
     onRefresh = null
 
+    isFetchError = null
+
     get streamingMode() {
         return !!this.finalizeStream
     }
@@ -158,12 +156,7 @@ class RecentActivity {
             while (recordsToLoad > 0) {
                 //fetch account transactions
                 const count = Math.min(recordsToLoad * 3, 100)
-                const newBatch = await loadTransactions({
-                    cursor: this.cursor,
-                    limit: count,
-                    order: 'desc',
-                    includeFailed: this.includeFailed
-                })
+                const newBatch = await loadLedgerTransactions(this.cursor)
                     .then(data => data.map(tx => processTransactionRecord(this.network, tx)))
                 //if no records returned
                 if (!newBatch.length) {
@@ -175,7 +168,7 @@ class RecentActivity {
                 //process records
                 const loadedRecords = []
                 for (let tx of newBatch) {
-                    this.cursor = tx.paging_token
+                    this.cursor = tx.ledger
                     loadedRecords.push(tx)
                     if (loadedRecords.length >= recordsToLoad) {
                         hasMore = true
@@ -188,7 +181,6 @@ class RecentActivity {
                     continue
                 //update records
                 if (loadedRecords.length) {
-                    this.removeInProgressTx(loadedRecords)
                     this.records = [...this.records, ...loadedRecords]
                     this.onRefresh()
                 }
@@ -199,6 +191,7 @@ class RecentActivity {
             }
         } catch (e) {
             if (e.name !== 'NotFoundError') {
+                this.isFetchError = true
                 console.error(e)
             } else {
                 this.hasMore = false
@@ -207,21 +200,28 @@ class RecentActivity {
         this.updateLoadingState(false)
     }
 
+    async loadLedger(sequence) { //this.includeFailed
+        const transactions = await loadLedgerTransactions(sequence)
+        if (!(transactions instanceof Array))
+            return null
+        for (let transaction of transactions) {
+            this.addNewTx(processTransactionRecord(this.network, transaction))
+        }
+        this.onRefresh()
+    }
+
     /**
      * Stream transactions history from Horizon
      */
     async startStreaming() {
         if (this.finalizeStream)
             return
-        this.cursor = undefined
         this.records = []
+        this.cursor = await ledgerStream.getLastSequence()
         await this.loadNextPage()
-
-        this.finalizeStream = streamTransactions('now', tx => {
-            const processed = processTransactionRecord(this.network, tx)
-            this.addNewTx(processed)
-            this.onRefresh()
-        }, this.includeFailed)
+        const onNewLedger = sequence => this.loadLedger(sequence)
+        ledgerStream.on(onNewLedger)
+        this.finalizeStream = () => ledgerStream.off(onNewLedger)
     }
 
     /**
@@ -251,9 +251,7 @@ class RecentActivity {
      * @returns {ParsedTxDetails}
      * @private
      */
-    addNewTx(tx, inProgress = false) {
-        const parsedTxDetails = tx.txHash ? tx : processTransactionRecord(this.network, tx, inProgress)
-        this.removeInProgressTx([tx])
+    addNewTx(parsedTxDetails, inProgress = false) {
         this.records.unshift(parsedTxDetails)
         if (!inProgress) {
             while (this.records.length > this.maxRecentEntries) {
@@ -262,19 +260,6 @@ class RecentActivity {
         }
         this.hasMore = undefined
         return parsedTxDetails
-    }
-
-    /**
-     * Remove pending in-progress transactions that match executed/failed transaction received from Horizon
-     * @param {ParsedTxDetails[]} newTransactions
-     */
-    removeInProgressTx(newTransactions) {
-        for (let tx of newTransactions) {
-            const idx = this.records.findIndex(existing => existing.txHash === tx.txHash)
-            if (idx >= 0) {
-                this.records.splice(idx, 1)
-            }
-        }
     }
 }
 
@@ -285,17 +270,15 @@ class RecentActivity {
  * @returns {ParsedTxDetails}
  * @internal
  */
-function processTransactionRecord(network, txRecord, inProgress = false) {
+function processTransactionRecord(network, txRecord) {
     const details = parseTxDetails({
         network: appSettings.networkPassphrase,
-        txEnvelope: txRecord.envelope_xdr,
-        result: txRecord.result_xdr,
-        meta: txRecord.result_meta_xdr,
-        createdAt: inProgress ? new Date().toISOString() : txRecord.created_at,
+        txEnvelope: txRecord.body,
+        result: txRecord.result,
+        meta: txRecord.meta,
+        createdAt: new Date(txRecord.ts * 1000).toISOString(),
+        ledger: txRecord.ledger,
         context: {}
     })
-    if (txRecord.paging_token) {
-        details.paging_token = txRecord.paging_token
-    }
     return details
 }

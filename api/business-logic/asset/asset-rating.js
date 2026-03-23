@@ -1,23 +1,18 @@
-const db = require('../../connectors/mongodb-connector'),
-    {validateNetwork, validateAssetName} = require('../validators'),
-    AssetDescriptor = require('./asset-descriptor'),
-    errors = require('../errors')
+const db = require('../../connectors/mongodb-connector')
+const {validateNetwork, validateAssetName} = require('../validators')
+const errors = require('../errors')
 
 async function queryAssetRating(network, asset) {
     validateNetwork(network)
-    validateAssetName(asset)
-
-    const assetFullName = new AssetDescriptor(asset).toFQAN()
+    asset = validateAssetName(asset)
 
     const assetInfo = await db[network].collection('assets')
-        .find({name: assetFullName})
-        .project({rating: 1})
-        .toArray()
+        .findOne({_id: asset}, {projection: {_id: 0, rating: 1}})
 
-    if (!assetInfo.length)
-        throw errors.notFound(`Asset ${assetFullName} wasn't found. Check if you specified the asset correctly.`)
+    if (!assetInfo)
+        throw errors.notFound(`Asset ${asset} wasn't found. Check if you specified the asset correctly.`)
 
-    return Object.assign({asset: assetFullName, rating: assetInfo[0].rating})
+    return Object.assign({asset, rating: assetInfo.rating || null})
 }
 
 module.exports = {queryAssetRating}

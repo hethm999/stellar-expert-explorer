@@ -1,10 +1,10 @@
 import React from 'react'
-import {setPageMetadata} from '../../../util/meta-tags-generator'
+import {usePageMetadata} from '@stellar-expert/ui-framework'
 import config from '../../../app-settings'
 import TxHistoryView from '../tx/tx-history-view'
 
 export default function PaymentLocatorPage() {
-    setPageMetadata({
+    usePageMetadata({
         title: `Payment locator`,
         description: `Explore payments on the Stellar ${config.activeNetwork} network. Search by amount, assets, transaction memo, source/destination account.`
     })
@@ -18,12 +18,10 @@ export default function PaymentLocatorPage() {
                 <li>All operations are supported: PAYMENT, PATH_PAYMENT, CREATE_ACCOUNT, MERGE_ACCOUNT.</li>
                 <li>Find everything, no matter how long ago transactions were processed.</li>
                 <li>Works even with deleted(merged) accounts.</li>
-                <li><a target="_blank" rel="noreferrer noopener" href="/openapi.html#tag/Payment-Locator-API">
-                    Free API for developers.</a></li>
             </ul>
         </div>
         <div className="space">
-            <TxHistoryView/>
+            <TxHistoryView presetFilter={{}}/>
         </div>
     </div>
 }

@@ -2,6 +2,7 @@ const db = require('../../connectors/mongodb-connector')
 const {unixNow, parseDate} = require('../../utils/date-utils')
 const {validateNetwork} = require('../validators')
 const errors = require('../errors')
+const {fetchLastLedger} = require('./ledger-resolver')
 
 const firstTs = {}
 
@@ -19,16 +20,20 @@ async function getFirstLedgerTimestamp(network) {
  * @return {Promise<Number>} - Sequence of the ledger closest to the given timestamp
  */
 async function resolveSequenceFromTimestamp(network, ts) {
-    if (ts > unixNow() - 1) return undefined
+    if (ts > unixNow() - 1) {
+        //looks like it's the last ledger
+        const last = await fetchLastLedger(network)
+        return last._id
+    }
     const ledger = await db[network].collection('ledgers')
         .findOne({ts: {$lte: ts}}, {sort: {ts: -1}, projection: {_id: 1}})
 
-    if (ledger) return ledger._id
+    if (ledger)
+        return ledger._id
     const first = await getFirstLedgerTimestamp(network)
     if (ts < first.ts) return undefined
-    //looks like it's the last ledger
-    const last = await db[network].collection('ledgers').findOne({}, {sort: {ts: -1}, projection: {_id: 1}})
-    return last._id
+    return first.ts
+
 }
 
 /**
@@ -45,7 +50,7 @@ async function resolveTimestampFromSequence(network, sequence) {
     return undefined
 }
 
-function queryTimestampFromSequence(network, query) {
+function queryTsFromSequence(network, query) {
     validateNetwork(network)
     const sequence = parseInt(query.sequence, 10)
     if (isNaN(sequence) || sequence < 0 || sequence > 2147483647)
@@ -62,21 +67,28 @@ function queryTimestampFromSequence(network, query) {
         })
 }
 
-function querySequenceFromTimestamp(network, query) {
+async function querySequenceFromTs(network, query) {
     validateNetwork(network)
     const ts = parseDate(query.timestamp)
     if (isNaN(ts) || ts === null || ts < 0 || ts > 2147483647)
         throw errors.validationError('timestamp')
-    return resolveSequenceFromTimestamp(network, ts)
-        .then(sequence => {
-            if (sequence === undefined)
-                throw errors.notFound(`Ledger matching timestamp ${query.timestamp} not found`)
-            return {
-                sequence,
-                timestamp: ts,
-                date: new Date(ts * 1000).toISOString()
-            }
-        })
+    if (ts > unixNow() - 1)
+        throw errors.badRequest('Cannot resolve ledgers from the timestamp in the future')
+    let ledger = await db[network].collection('ledgers')
+        .findOne({ts: {$lte: ts}}, {sort: {ts: -1}, projection: {_id: 1, ts: 1}})
+    if (!ledger) {
+        const firstLedger = await getFirstLedgerTimestamp(network)
+        if (firstLedger > ts) {
+            ledger = firstLedger
+        }
+    }
+    if (!ledger)
+        throw errors.notFound(`Ledger matching timestamp ${query.timestamp} not found`)
+    return {
+        sequence: ledger._id,
+        timestamp: ledger.ts,
+        date: new Date(ledger.ts * 1000).toISOString()
+    }
 }
 
-module.exports = {resolveSequenceFromTimestamp, resolveTimestampFromSequence, queryTimestampFromSequence, querySequenceFromTimestamp}
+module.exports = {resolveSequenceFromTimestamp, resolveTimestampFromSequence, queryTsFromSequence, querySequenceFromTs}

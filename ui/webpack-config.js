@@ -9,17 +9,23 @@ module.exports = initWebpackConfig({
             htmlTemplate: './static-template/index.html'
         }
     },
-    outputPath: './public/',
+    outputPath: path.join(__dirname, './public/'),
     staticFilesPath: './static/',
     scss: {
-        additionalData: '@import "~@stellar-expert/ui-framework/basic-styles/variables.scss";'
+        additionalData: '@import "~@stellar-expert/ui-framework/basic-styles/variables.scss";',
+        sassOptions: {
+            quietDeps: true,
+            silenceDeprecations: ['import']
+        }
     },
     define: {
         appVersion: pkgInfo.version
     },
     devServer: {
         host: '0.0.0.0',
-        https: true,
+        server: {
+            type: 'https'
+        },
         port: 9001
     }
 })

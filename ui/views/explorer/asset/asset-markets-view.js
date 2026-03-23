@@ -1,5 +1,5 @@
 import React from 'react'
-import {Dropdown, useDependantState} from '@stellar-expert/ui-framework'
+import {Dropdown, useAssetMeta, useDependantState} from '@stellar-expert/ui-framework'
 import {AssetDescriptor} from '@stellar-expert/asset-descriptor'
 import {navigation} from '@stellar-expert/navigation'
 import {resolvePath} from '../../../business-logic/path'
@@ -11,12 +11,15 @@ export default function AssetMarketsView({asset}) {
     if (!asset)
         return null
     const assetId = asset.descriptor.toString()
+    const assetMeta = useAssetMeta(asset.asset)
 
     const [selectedMarket, setSelectedMarket] = useDependantState(() => navigation.query.market || null, [assetId])
 
     const [tradingPairs, setTradingPairs] = useDependantState(() => {
         apiCall(`asset/${assetId}/trading-pairs`)
             .then(pairs => {
+                if (!(pairs instanceof Array))
+                    return null
                 pairs = (pairs || []).map(v => ({
                     value: v,
                     title: AssetDescriptor.parse(v).toCurrency(12)
@@ -49,7 +52,7 @@ export default function AssetMarketsView({asset}) {
     if (!tradingPairs.length) return <div className="dimmed">No markets found</div>
     if (tradingPairs.length === 10) {
         tradingPairs.push('-')
-        tradingPairs.push({value: 'all', title: `All ${asset.descriptor.toCurrency()} markets`})
+        tradingPairs.push({value: 'all', title: `All ${assetMeta?.code || asset.descriptor.toCurrency()} markets`})
     }
 
     const baseMarket = AssetDescriptor.parse(assetId)

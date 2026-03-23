@@ -1,12 +1,13 @@
 import React, {useState} from 'react'
-import {AccountAddress, Button, useDirectoryTags} from '@stellar-expert/ui-framework'
+import {Button, useDirectoryTags, usePageMetadata} from '@stellar-expert/ui-framework'
 import {navigation} from '@stellar-expert/navigation'
 import {useGithubOAuth} from '../../business-logic/oauth/oauth-hooks'
 import {isDirectoryAdmin} from './is-directory-admin'
 import {apiCall} from '../../models/api'
+import appSettings from '../../app-settings'
 
 function isDomainValid(domain) {
-    return /^(((?!-))(xn--)?[a-z0-9\-_]{0,61}[a-z0-9]\.)*(xn--)?([a-z0-9\-]{1,61}|[a-z0-9\-]{1,30})\.[a-z]{2,}$/.test(domain)
+    return /^\S+\.[a-z]{2,}$/.test(domain)
 }
 
 export default function DirectoryBlockDomainView() {
@@ -21,7 +22,8 @@ export default function DirectoryBlockDomainView() {
 
 
     async function saveEntry() {
-        if (!domain?.length) return
+        if (!domain?.length)
+            return
         const domains = batchMode
             ? domain.split('\n')
                 .map(v => v.trim())
@@ -57,6 +59,11 @@ export default function DirectoryBlockDomainView() {
         setInProgress(false)
         navigation.navigate('/directory/blocked-domains')
     }
+
+    usePageMetadata({
+        title: `Flag domain in StellarExpert Directory`,
+        description: `Report a domain spotted in illicit or fraudulent activity related to Stellar Network.`
+    })
 
     return <>
         <div className="desktop-only text-small" style={{float: 'right', paddingTop: '1em'}}>

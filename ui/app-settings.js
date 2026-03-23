@@ -12,8 +12,9 @@ class AppSettings {
             this[key] = config[key]
         }
 
-        const networkFromUrl = (/^\/(?:\w+)\/(\w+)/i.exec(location.pathname) || [])[1]
-        setStellarNetwork(networkFromUrl || Object.keys(this.networks)[0])
+        const networkFromUrl = ((/^\/(?:\w+)\/(\w+)/i.exec(location.pathname) || [])[1] || '').toLowerCase()
+        const availableNetworks = Object.keys(this.networks)
+        setStellarNetwork(availableNetworks.includes(networkFromUrl) ? networkFromUrl : availableNetworks[0])
     }
 
     directoryAdmins
@@ -23,6 +24,8 @@ class AppSettings {
     networks
 
     oauth
+
+    turnstileKey
 
     get activeNetwork() {
         return getCurrentStellarNetwork()

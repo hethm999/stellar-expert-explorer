@@ -2,15 +2,19 @@ const config = require('../../app.config.json')
 const errors = require('../errors')
 const db = require('../../connectors/mongodb-connector')
 const elastic = require('../../connectors/elastic-connector')
+const ShardedElasticQuery = require('../../connectors/sharded-elastic-query')
+const {parseGenericId} = require('../../utils/id-utils')
 const Asset = require('../asset/asset-descriptor')
-const IdConstraints = require('../../utils/id-constraints')
-const {validateNetwork, validateOfferId, validatePoolId, isValidContractAddress} = require('../validators')
+const {validateNetwork, validateOfferId, validatePoolId, validateAccountOrContractAddress} = require('../validators')
 const {preparePagedData, normalizeLimit, normalizeOrder} = require('../api-helpers')
-const {resolveSequenceFromTimestamp} = require('../ledger/ledger-timestamp-resolver')
-const {accountResolver} = require('../account/account-resolver')
-const {fetchMemoIds} = require('../memo/memo-resolver')
-const {fetchArchiveTransactions, fetchSingleArchiveTransaction, fetchArchiveLedgerTransactions} = require('./archive-locator')
+const {resolveSequenceFromTimestamp, resolveTimestampFromSequence} = require('../ledger/ledger-timestamp-resolver')
 const {fetchLedgers, fetchLedger} = require('../ledger/ledger-resolver')
+const {
+    fetchArchiveTransactions,
+    fetchSingleArchiveTransaction,
+    fetchArchiveLedgerTransactions
+} = require('./archive-locator')
+const RangeConstraints = require('./range-constraints')
 
 class TxQuery {
     constructor(network, basePath, {order = 'desc', cursor, limit, ...extraParams}) {
@@ -22,8 +26,10 @@ class TxQuery {
             throw new errors.validationError('order', 'Invalid sorting order')
         this.order = order
         this.limit = normalizeLimit(limit)
-        this.constraints = new IdConstraints()
+        this.idConstraints = new RangeConstraints()
+        this.yearConstraints = new RangeConstraints(elastic.getIndexLowerBoundary(network, 'opIndex'), new Date().getUTCFullYear())
         this.params = extraParams
+        this.elasticQuery = new ShardedElasticQuery(this.network, 'opIndex')
     }
 
     /**
@@ -35,9 +41,13 @@ class TxQuery {
      */
     network
     /**
-     * @type {IdConstraints}
+     * @type {RangeConstraints}
      */
-    constraints
+    idConstraints
+    /**
+     * @type {RangeConstraints}
+     */
+    yearConstraints
     /**
      * @type {{}}
      */
@@ -60,10 +70,54 @@ class TxQuery {
     params
 
     /**
+     * Fetch data from Elastic index and archive DB
+     * @return {Promise<TxQueryResponse[]>}
+     * @private
+     */
+    async fetchTransactions() {
+        const filter = await this.buildQueryParams()
+        if (filter === null)
+            return []
+        //execute index query
+        const data = await this.elasticQuery.search({
+            filter,
+            fields: ['id'],
+            sort: 'id',
+            order: this.order,
+            limit: this.limit,
+            excludeSource: true,
+            minYear: this.yearConstraints.from,
+            maxYear: this.yearConstraints.to
+        })
+        if (!data?.length)
+            return []
+        const ids = data.map(v => BigInt(v._id))
+        //fetch transactions from archive and corresponding ledgers
+        const [transactions, ledgers] = await Promise.all([
+            fetchArchiveTransactions(this.network, ids, normalizeOrder(this.order)),
+            this.fetchLedgersInfo(ids)
+        ])
+        //prepare response, merge data from transactions and ledgers responses
+        return transactions.map(tx => TxQuery.prepareResponseEntry(tx, ledgers[tx.id >> 32n], true))
+    }
+
+    /**
+     * @return {Promise<number>}
+     */
+    async count() {
+        if (this.isUnfeasible || this.idConstraints.isUnfeasible)
+            return 0
+        const filter = await this.buildQueryParams()
+        if (filter === null)
+            return 0
+        return await this.elasticQuery.count({filter})
+    }
+
+    /**
      * Apply cursor parameters
      * @private
      */
-    addCursorFilter() {
+    async addCursorFilter() {
         if (!this.cursor)
             return
         try {
@@ -71,9 +125,19 @@ class TxQuery {
             if (cursor < 0n)
                 return
             if (this.order === 'asc') {
-                this.constraints.addBottomConstraint(cursor + 1n)
+                this.idConstraints.addBottomConstraint(cursor + 1n)
+                try {
+                    const ts = await resolveTimestampFromSequence(this.network, parseGenericId(cursor).ledger)
+                    this.yearConstraints.addBottomConstraint(new Date(ts * 1000).getUTCFullYear())
+                } catch (e) {
+                }
             } else {
-                this.constraints.addTopConstraint(cursor - 1n)
+                this.idConstraints.addTopConstraint(cursor - 1n)
+                try {
+                    const ts = await resolveTimestampFromSequence(this.network, parseGenericId(cursor).ledger)
+                    this.yearConstraints.addTopConstraint(new Date(ts * 1000).getUTCFullYear())
+                } catch (e) {
+                }
             }
         } catch (e) {
             throw errors.validationError('cursor', `Invalid paging cursor: "${this.cursor}".`)
@@ -90,13 +154,15 @@ class TxQuery {
         const promises = []
         if (to !== undefined) {
             const constraint = resolveSequenceFromTimestamp(this.network, parseInt(to, 10))
-                .then(sequence => this.constraints.addTopConstraint(BigInt((sequence + 1) >>> 0) << 32n))
+                .then(sequence => this.idConstraints.addTopConstraint(BigInt((sequence + 1) >>> 0) << 32n))
             promises.push(constraint)
+            this.yearConstraints.addTopConstraint(new Date(to * 1000).getUTCFullYear())
         }
         if (from !== undefined) {
             const constraint = resolveSequenceFromTimestamp(this.network, parseInt(from, 10))
-                .then(sequence => this.constraints.addBottomConstraint(BigInt(sequence >>> 0) << 32n))
+                .then(sequence => this.idConstraints.addBottomConstraint(BigInt(sequence >>> 0) << 32n))
             promises.push(constraint)
+            this.yearConstraints.addBottomConstraint(new Date(from * 1000).getUTCFullYear())
         }
         if (promises.length) {
             await Promise.all(promises)
@@ -168,7 +234,7 @@ class TxQuery {
                 }
             })
             const matchedAssets = await db[this.network].collection('assets')
-                .find({name: {$in: assets}}, {projection: {_id: 1}}).toArray()
+                .find({_id: {$in: assets}}, {projection: {_id: 1}}).toArray()
 
             const assetsFilter = []
             for (const matchedAsset of matchedAssets) {
@@ -198,23 +264,13 @@ class TxQuery {
             if (!addresses.length)
                 continue
             if (addresses.length > 10)
-                throw errors.validationError(param, `Too many account conditions.`)
+                throw errors.validationError(param, `Too many address conditions.`)
 
             for (const address of addresses) {
-                if (typeof address !== 'string' || address.length !== 56)
-                    throw errors.validationError(param, `Invalid account address: ${address}.`)
-                const prefix = address[0]
-                if (prefix !== 'G' && prefix !== 'C')
-                    throw errors.validationError(param, `Invalid account address: ${address}.`)
+                validateAccountOrContractAddress(address)
             }
 
-            const matchedAccounts = await accountResolver.resolveIds(this.network, addresses)
-
-            if (!matchedAccounts.length) {
-                this.isUnfeasible = true
-                continue
-            }
-            filters.push({terms: {[key]: matchedAccounts}})
+            filters.push({terms: {[key]: addresses}})
         }
     }
 
@@ -252,12 +308,10 @@ class TxQuery {
         if (pools.length > 10)
             throw errors.validationError('pool', `Too many pool conditions.`)
 
-        for (const pool of pools) {
-            validatePoolId(pool)
-        }
+        pools = pools.map(pool => validatePoolId(pool))
 
         const matchedPools = await db[this.network].collection('liquidity_pools')
-            .find({hash: {$in: pools}}, {projection: {_id: 1}}).toArray()
+            .find({_id: {$in: pools}}, {projection: {_id: 1}}).toArray()
 
         if (!matchedPools.length) {
             this.isUnfeasible = true
@@ -282,13 +336,9 @@ class TxQuery {
             return
         if (memos.length > 10)
             throw errors.validationError('memo', `Too many memo conditions.`)
-
-        const memoIds = await fetchMemoIds(this.network, memos)
-        if (!memoIds.length) {
-            this.isUnfeasible = true
-            return
-        }
-        filters.push({terms: {memo: memoIds}})
+        if (memos.some(m => m.length > 60))
+            throw errors.validationError('memo', `Memo too long.`)
+        filters.push({terms: {memo: memos}})
     }
 
     /**
@@ -297,52 +347,26 @@ class TxQuery {
      * @private
      */
     addIdRangeFilter(filters) {
-        const {constraints} = this
-        if (constraints.isEmpty)
+        const {idConstraints} = this
+        if (idConstraints.isEmpty)
             return
-        if (constraints.isUnfeasible) {
+        if (idConstraints.isUnfeasible) {
             this.isUnfeasible = true
             return
         }
         filters.push({
             range: {
-                id: constraints.resolve()
+                id: idConstraints.resolve()
             }
         })
     }
 
     /**
-     * Prepare Elastic query
-     * @param {[]} filter - Filters aggregator
-     * @return {{}}
+     * Prepare terms query
+     * @return {Promise<[]|null>}
      * @private
      */
-    buildQuery(filter) {
-        const {opIndex} = config.networks[this.network]
-        return {
-            index: opIndex,
-            _source: false,
-            size: this.limit,
-            timeout: '5s',
-            track_total_hits: this.limit,
-            sort: [
-                {
-                    id: {order: this.order}
-                }
-            ],
-            query: {
-                bool: {filter}
-            },
-            fields: ['id']
-        }
-    }
-
-    /**
-     * Fetch data from Elastic index and archive DB
-     * @return {Promise<TxQueryResponse[]>}
-     * @private
-     */
-    async fetchData() {
+    async buildQueryParams() {
         const filter = []
         //process filter builder pipeline
         const pipeline = [
@@ -363,22 +387,11 @@ class TxQuery {
             }
             //skip index lookup and return empty results set if the result is unfeasible
             if (this.isUnfeasible)
-                return []
+                return null
         }
-        //prepare and execute index query
-        const queryRequest = this.buildQuery(filter)
-        const elasticResponse = await elastic.search(queryRequest)
-        //retrieve transaction IDs from the response
-        const ids = elasticResponse.hits.hits.map(h => BigInt(h._id))//& 0x7ffffffffffff000n)
-        if (!ids.length)
-            return []
-        //fetch transactions from archive and corresponding ledgers
-        const [transactions, ledgers] = await Promise.all([
-            fetchArchiveTransactions(this.network, ids, normalizeOrder(this.order)),
-            this.fetchLedgersInfo(ids)
-        ])
-        //prepare response, merge data from transactions and ledgers responses
-        return transactions.map(tx => TxQuery.prepareResponseEntry(tx, ledgers[tx.id.high], true))
+        if (this.yearConstraints.isUnfeasible)
+            return null
+        return filter
     }
 
     /**
@@ -419,10 +432,10 @@ class TxQuery {
      */
     async toArray() {
         //do not query data if unfeasible conditions detected
-        if (this.isUnfeasible || this.constraints.isUnfeasible)
+        if (this.isUnfeasible || this.idConstraints.isUnfeasible)
             return this.emptyResponse()
         //fetch data
-        const records = await this.fetchData()
+        const records = await this.fetchTransactions()
 
         return preparePagedData(this.basePath, {
             sort: 'id',
@@ -435,7 +448,7 @@ class TxQuery {
 
     /**
      * @param {{}} tx - Transaction data fetched from archive db
-     * @param {{}} ledger - Ledger data fretched from analytics db
+     * @param {{}} ledger - Ledger data fetched from analytics db
      * @param {Boolean} [addPagingToken] - Whether to add paging token for - the list response
      * @return {TxQueryResponse}
      * @private
@@ -444,9 +457,10 @@ class TxQuery {
         const id = tx.id.toString()
         const res = {
             id,
-            hash: tx.hash.toString('hex'),
+            hash: (tx.hash instanceof Array ? tx.hash[0] : tx.hash).toString('hex'),
             ledger: ledger._id,
             ts: ledger.ts,
+            protocol: ledger.version,
             body: tx.body.toString('base64'),
             meta: tx.meta.toString('base64'),
             result: tx.result.toString('base64')
@@ -472,7 +486,9 @@ class TxQuery {
         if (!tx)
             throw errors.notFound(`Transaction ${txIdOrHash} not found on the ${network} ledger`)
 
-        const ledger = await fetchLedger(network, tx.id.high)
+        const ledger = await fetchLedger(network, Number(tx.id >> 32n))
+        if (!ledger) // the ledger has not been processed by the ingestion pipeline yet
+            throw errors.notFound(`Transaction ${txIdOrHash} has not been been processed yet`)
         return TxQuery.prepareResponseEntry(tx, ledger)
     }
 
@@ -495,8 +511,6 @@ class TxQuery {
         const ledger = await fetchLedger(network, ledgerSequence)
         return res.map(tx => TxQuery.prepareResponseEntry(tx, ledger))
     }
-
-
 }
 
 const typeMapping = {
@@ -540,6 +554,7 @@ function enforceArray(value) {
     }
     return value
 }
+
 
 module.exports = TxQuery
 

@@ -1,7 +1,12 @@
-const {StrKey} = require('stellar-sdk')
+const {StrKey} = require('@stellar/stellar-sdk')
 const mongodbStorage = require('./storage/mongodb-directory-storage')
 const {validateUpdateEntryData, validateDeletedEntryData} = require('./directory-request-validators')
-const {createGithubWrapper, requestGithubUserDetails, generateAccountFileName, getRepoFileHash} = require('./directory-github-api-utils')
+const {
+    createGithubWrapper,
+    requestGithubUserDetails,
+    generateAccountFileName,
+    getRepoFileHash
+} = require('./directory-github-api-utils')
 const {formatRequestTitle, formatRequestBody, formatGithubAccountEntry} = require('./directory-github-text-formatter')
 const directoryTags = require('./directory-tags')
 const errors = require('../errors')
@@ -107,7 +112,7 @@ const directoryManager = {
                 throw errors.badRequest('Invalid parameter "address". Expected an array of addresses to fetch.')
             if (address.length > 50)
                 throw errors.badRequest('Too many "address" conditions. Maximum 50 searched addresses allowed.')
-            query.address = address.filter(a => StrKey.isValidEd25519PublicKey(a))
+            query.address = address.filter(a => StrKey.isValidEd25519PublicKey(a) || StrKey.isValidContract(a))
             if (!query.limit) {
                 query.limit = 50
             }
@@ -136,7 +141,7 @@ const directoryManager = {
         return await mongodbStorage.listBlockedDomains(basePath, query)
     },
     async blockDomain({domain, reason, accessToken}) {
-        if (!/^(((?!-))(xn--)?[a-z0-9\-_]{0,61}[a-z0-9]\.)*(xn--)?([a-z0-9\-]{1,61}|[a-z0-9\-]{1,30})\.[a-z]{2,}$/.test(domain))
+        if (!/^\S+\.[a-z]{2,}$/.test(domain))
             throw errors.badRequest('Invalid domain name')
         if (await mongodbStorage.isDomainBlocked(domain))
             return {domain}//already added

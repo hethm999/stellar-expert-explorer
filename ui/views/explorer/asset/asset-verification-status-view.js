@@ -15,9 +15,10 @@ export default function AssetVerificationStatusView({asset}) {
     const meta = useAssetMeta(asset.descriptor)
     const directoryInfo = useDirectory(asset?.descriptor?.issuer)
 
-    if (issuerInfo === undefined || !meta) return null
+    if (issuerInfo === undefined || !meta)
+        return null
 
-    if (meta.blocked || directoryInfo && (directoryInfo.tags || []).includes('malicious')) return <>
+    if (meta.unsafe || directoryInfo && (directoryInfo.tags || []).includes('malicious')) return <>
         <i className="icon icon-warning color-warning"/>
         Warning: reported for illicit or fraudulent activity
     </>

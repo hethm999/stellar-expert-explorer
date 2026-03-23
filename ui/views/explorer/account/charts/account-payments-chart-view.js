@@ -6,10 +6,11 @@ export default Chart.withErrorBoundary(function AccountPaymentsChartView({addres
     const {data = [], loaded} = useAccountStatsHistory(address)
     if (!loaded)
         return <Chart.Loader/>
+    if (!(data instanceof Array))
+        return <Chart.Loader unavailable/>
     const config = {
         plotOptions: {
             column: {
-                stacking: 'normal',
                 marker: {
                     enabled: false
                 },

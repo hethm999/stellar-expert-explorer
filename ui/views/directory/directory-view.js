@@ -1,8 +1,7 @@
-import React, {useEffect, useState} from 'react'
+import React, {useState} from 'react'
 import cn from 'classnames'
-import {AccountAddress, useExplorerPaginatedApi, useDirectoryTags} from '@stellar-expert/ui-framework'
+import {AccountAddress, useExplorerPaginatedApi, useDirectoryTags, usePageMetadata} from '@stellar-expert/ui-framework'
 import {navigation} from '@stellar-expert/navigation'
-import {setPageMetadata} from '../../util/meta-tags-generator'
 import {useGithubOAuth} from '../../business-logic/oauth/oauth-hooks'
 import DirectoryTagsLineView from './directory-tags-line-view'
 import GridDataActions from '../components/grid-data-actions'
@@ -39,12 +38,10 @@ export default function DirectoryView() {
         }
     })
 
-    useEffect(() => {
-        setPageMetadata({
-            title: `Directory of well-known Stellar XLM accounts`,
-            description: `Discover well-known Stellar accounts, filter data by account address, description, or tags.`
-        })
-    }, [])
+    usePageMetadata({
+        title: `Directory of well-known Stellar Network accounts`,
+        description: `Discover well-known Stellar accounts, filter data by account address, description, or tags.`
+    })
 
     const queryParams = {
         tag: Array.from(filters),
@@ -97,15 +94,15 @@ export default function DirectoryView() {
                            value={searchTerm} style={{maxWidth: '36em'}} className="primary"
                            placeholder="Search accounts by domain, company name, or public key"/>
                 </form>
-                <div>
+                {directoryTags instanceof Array && <div>
                     <div className="dimmed text-small">
                         Filter by tag:
                     </div>
                     <DirectoryBlockTagsView tags={directoryTags.map(t => t.name)} filters={filters} selectTag={selectTag}/>
-                </div>
+                </div>}
             </div>
             {loading && <div className="loader"/>}
-            {loaded && <>
+            {(loaded && data.length > 0) ? <>
                 <ul className="striped space">
                     {data.map(entry => <li key={entry.address}
                                            style={{padding: '1em', lineHeight: 1.6, overflow: 'hidden'}}>
@@ -122,8 +119,7 @@ export default function DirectoryView() {
                     </li>)}
                 </ul>
                 <GridDataActions model={directory} allowExport={false}/>
-            </>}
-
+            </> : <div className="dimmed text-center text-small double-space">(no accounts matching search criteria)</div>}
             <div className="double-space dimmed">
                 <p>
                     You can request new address listing <a href="/directory/add">here</a>. The data from {' '}

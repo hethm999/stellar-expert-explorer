@@ -1,9 +1,8 @@
 import React, {useState} from 'react'
-import {FederationServer} from 'stellar-sdk'
-import {useDependantState} from '@stellar-expert/ui-framework'
+import {Federation} from '@stellar/stellar-sdk'
+import {useDependantState, usePageMetadata} from '@stellar-expert/ui-framework'
 import {navigation} from '@stellar-expert/navigation'
 import appSettings from '../../../app-settings'
-import {setPageMetadata} from '../../../util/meta-tags-generator'
 import {detectSearchType} from '../../../business-logic/search'
 import {resolvePath} from '../../../business-logic/path'
 import ErrorNotificationBlock from '../../components/error-notification-block'
@@ -40,9 +39,16 @@ async function processSearchTerm(originalTerm) {
         let searchTypes = detectSearchType(originalTerm)
         //resolve federation address
         if (searchTypes[0] === 'federation') {
-            const {account_id} = await FederationServer.resolve(originalTerm)
+            const {account_id} = await Federation.Server.resolve(originalTerm)
             term = account_id
             searchTypes = ['account']
+        } else if (searchTypes[0] === 'sorobandomains') {
+            const resolved = await fetch(`https://sorobandomains-query.lightsail.network/api/v1/query?q=${originalTerm.trim().toLowerCase()}&type=domain`)
+                .then(res => res.json())
+            if (resolved?.address) {
+                term = resolved.address
+                searchTypes = ['account']
+            }
         }
         return {term, originalTerm, searchTypes, error: null}
 
@@ -103,12 +109,12 @@ function SearchResultsWrapper({originalTerm, children}) {
 
 export default function SearchResultsView() {
     const originalTerm = (navigation.query.term || '').trim()
+    usePageMetadata({
+        title: `Search "${originalTerm}"`,
+        description: `Search results for term "${originalTerm}" on Stellar ${appSettings.activeNetwork} network.`
+    })
 
     const [state, setState] = useDependantState(() => {
-        setPageMetadata({
-            title: `Search "${originalTerm}"`,
-            description: `Search results for term "${originalTerm}" on Stellar ${appSettings.activeNetwork} network.`
-        })
         processSearchTerm(originalTerm)
             .then(newState => setState(newState))
 

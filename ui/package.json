@@ -1,7 +1,7 @@
 {
   "name": "ui.stellar.expert",
   "private": true,
-  "version": "0.24.10",
+  "version": "0.31.8",
   "author": "StellarExpertTeam<info@stellar.expert>",
   "description": "Block explorer with analytics platform for Stellar Network that features granular historical statistics, detailed assets dashboard, and advanced payment locator.",
   "main": "app.js",
@@ -9,7 +9,7 @@
     "build": "webpack --mode=production --config ./webpack-config.js",
     "dev-server": "webpack serve --mode development --config ./webpack-config.js",
     "test": "cross-env NODE_ENV=test node_modules/.bin/mocha --require @babel/register",
-    "build-api-docs": "pnpm dlx redoc-cli build open-api/openapi.yml -t open-api/openapi-template.hbs -o public/openapi.html --options.disableSearch --options.hideDownloadButton --options.hideLoading --options.expandSingleSchemaField --options.onlyRequiredInSamples --options.theme.colors.primary.main=#0691B7 --options.theme.typography.fontFamily=ClearSans --options.theme.typography.headings.fontFamily=RobotoCondensed --options.theme.typography.code.fontFamily=\"Consolas, 'Liberation Mono', Menlo, Courier, monospace\" --options.theme.typography.headings.fontWeight=300 --options.theme.typography.fontWeightRegular=300 --options.theme.typography.fontSize=16px --options.theme.logo.maxHeight=60px --options.theme.logo.gutter=8px --options.theme.spacing.sectionVertical=24px --options.theme.typography.headings.lineHeight=1.3em --options.theme.typography.menu.level1Items.textTransform=uppercase"
+    "build-api-docs": "pnpm --package=@redocly/cli dlx openapi build-docs open-api/openapi.yml -t open-api/openapi-template.hbs -o public/openapi.html"
   },
   "browserslist": [
     "> 1%",
@@ -18,17 +18,22 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/orbitlens/stellar-expert.git"
+    "url": "https://github.com/stellar-expert/stellar-expert-explorer.git"
   },
   "dependencies": {
     "@albedo-link/intent": "^0.12.0",
-    "@stellar-expert/asset-descriptor": "github:stellar-expert/asset-descriptor#v1.2.3",
-    "@stellar-expert/claimable-balance-utils": "github:stellar-expert/claimable-balance-utils#v1.2.0",
-    "@stellar-expert/client-cache": "github:stellar-expert/client-cache",
-    "@stellar-expert/formatter": "github:stellar-expert/formatter#v2.2.1",
-    "@stellar-expert/navigation": "github:stellar-expert/navigation#v1.0.2",
-    "@stellar-expert/tx-signers-inspector": "^1.5.0",
-    "@stellar-expert/ui-framework": "github:stellar-expert/ui-framework#v1.8.14",
+    "@stellar-asset-lists/sdk": "^1.0.0",
+    "@stellar-expert/asset-descriptor": "1.5.0",
+    "@stellar-expert/claimable-balance-utils": "^1.4.1",
+    "@stellar-expert/client-cache": "^1.1.0",
+    "@stellar-expert/contract-wasm-interface-parser": "^3.2.0",
+    "@stellar-expert/formatter": "^3.0.0",
+    "@stellar-expert/navigation": "^1.1.0",
+    "@stellar-expert/tx-meta-effects-parser": "^8.3.3",
+    "@stellar-expert/tx-signers-inspector": "^1.8.2",
+    "@stellar-expert/ui-framework": "1.16.7",
+    "@stellar/stellar-base": "14.0.4",
+    "@stellar/stellar-sdk": "14.4.3",
     "classnames": "^2.3.2",
     "deepmerge": "^4.2.2",
     "highcharts": "9.0.0",
@@ -41,28 +46,25 @@
     "react-force-graph-2d": "^1.25.1",
     "react-router": "^5.3.3",
     "sha.js": "^2.4.11",
-    "stellar-base": "10.0.0-beta.4",
-    "stellar-sdk": "11.0.0-beta.4",
     "throttle-debounce": "^5.0.0"
   },
   "devDependencies": {
-    "@stellar-expert/eslint-config-js": "github:stellar-expert/eslint-config-js",
-    "@stellar-expert/eslint-config-react": "github:stellar-expert/eslint-config-react",
-    "@stellar-expert/webpack-template": "github:stellar-expert/webpack-template#v1.3.1",
-    "redoc-cli": "^0.13.15"
-  },
-  "pnpm": {
-    "overrides": {
-      "@stellar-expert/asset-descriptor": "github:stellar-expert/asset-descriptor#v1.2.3",
-      "@stellar-expert/formatter": "github:stellar-expert/formatter#v2.2.1",
-      "stellar-sdk": "11.0.0-beta.4",
-      "stellar-base": "10.0.0-beta.4"
-    }
+    "@redocly/cli": "^1.25.11",
+    "@stellar-expert/eslint-config-js": "^1.1.0",
+    "@stellar-expert/eslint-config-react": "^1.1.0",
+    "@stellar-expert/webpack-template": "1.5.1"
   },
   "overrides": {
-    "@stellar-expert/asset-descriptor": "github:stellar-expert/asset-descriptor#v1.2.3",
-    "@stellar-expert/formatter": "github:stellar-expert/formatter#v2.2.1",
-    "stellar-sdk": "11.0.0-beta.4",
-    "stellar-base": "10.0.0-beta.4"
+    "@stellar/stellar-sdk": "14.0.4",
+    "@stellar/stellar-base": "14.4.3"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "protobufjs"
+    ],
+    "onlyBuiltDependencies": [
+      "core-js",
+      "node-sass"
+    ]
   }
 }

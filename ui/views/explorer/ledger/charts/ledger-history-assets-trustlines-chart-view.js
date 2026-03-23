@@ -7,6 +7,8 @@ export default Chart.withErrorBoundary(function LedgerHistoryAssetsTrustlinesCha
     const {data = [], loaded} = useLedgerStats()
     if (!loaded)
         return <Chart.Loader/>
+    if (!(data instanceof Array))
+        return <Chart.Loader unavailable/>
     const config = {
         yAxis: [{
             title: {

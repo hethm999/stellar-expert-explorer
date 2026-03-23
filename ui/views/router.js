@@ -7,7 +7,6 @@ import Loadable from './components/loadable'
 
 import NotFoundView from './pages/not-found-page-view'
 
-
 export default function AppRouter({history}) {
     return <Router history={history}>
         <Switch>
@@ -23,17 +22,12 @@ export default function AppRouter({history}) {
                         <Redirect from="/" to="/explorer/public" exact/>
                         {/*<Route path="/" exact component={Home}/>*/}
                         {/*tools*/}
-                        <Route path="/tax-export/:network/" layout="Layout">
-                            <Loadable moduleKey="tax-export"
-                                      load={() => import(/* webpackChunkName: "tax-export" */ './export/tax-data-export-view')}/>
-                        </Route>
                         <Route path="/directory">
                             <Loadable moduleKey="directory"
                                       load={() => import(/* webpackChunkName: "directory" */ './directory/directory-router')}/>
                         </Route>
                         {/*old paths fixed*/}
                         <Redirect from="/explorer/:network/directory" to="/directory" push={true}/>
-                        <Redirect from="/explorer/:network/tax-export" to="/tax-export/:network/" push={true}/>
                         {/*explorer*/}
                         <Route path="/explorer/:network">
                             <Loadable moduleKey="explorer-router"
@@ -45,15 +39,19 @@ export default function AppRouter({history}) {
                             <Loadable moduleKey="demolisher"
                                       load={() => import(/* webpackChunkName: "demolisher" */ './demolisher/account-demolisher-view')}/>
                         </Route>
-                        {/*relations graph*/}
-                        <Route path="/relations">
-                            <Loadable moduleKey="relations"
-                                      load={() => import(/* webpackChunkName: "relations" */ './graph/graph-router')}/>
+                        {/*asset lists*/}
+                        <Route path="/asset-lists">
+                            <Loadable moduleKey="asset-lists"
+                                      load={() => import(/* webpackChunkName: "asset-lists" */ './asset-lists/asset-list-router')}/>
                         </Route>
                         {/*blog*/}
                         <Route path="/blog">
                             <Loadable moduleKey="blog"
                                       load={() => import(/* webpackChunkName: "blog" */ './blog/blog-router')}/>
+                        </Route>
+                        <Route path="/info">
+                            <Loadable moduleKey="info"
+                                      load={() => import(/* webpackChunkName: "info" */ './info/info-router')}/>
                         </Route>
                         {/*not found*/}
                         <Route component={NotFoundView}/>
@@ -63,11 +61,6 @@ export default function AppRouter({history}) {
         </Switch>
     </Router>
 }
-
-//<Route path="/terms" component={loadable(() =>
-//   import(/* webpackChunkName: "legal" */ './terms/legal-router'))}/>
-/*<Route path="/info">
-    <Loadable moduleKey="info" load={() => import(/!* webpackChunkName: "info" *!/ './info/info-router')}/></Route>*/
 
 AppRouter.propTypes = {
     history: PropTypes.object.isRequired

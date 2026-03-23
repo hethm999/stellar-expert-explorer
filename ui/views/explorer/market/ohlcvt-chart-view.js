@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState, useCallback} from 'react'
 import {useExplorerApi} from '@stellar-expert/ui-framework'
-import {formatWithAutoPrecision, formatPrice} from '@stellar-expert/formatter'
+import {formatWithAutoPrecision, formatPrice, toUnixTimestamp} from '@stellar-expert/formatter'
 import Chart from '../../components/chart/chart'
 
 /**
@@ -30,6 +30,10 @@ function processData(data) {
 function buildUrl(baseEndpoint, from, to) {
     let endpoint = `${baseEndpoint}/candles`
     const queryParams = []
+    if (!from && !to) {
+        to = trimTimestamp5m(new Date().getTime() + 5 * 60 * 1000) / 1000
+        from = to - 10 * 365 * 24 * 60 * 60 // 10 years
+    }
     if (from) {
         queryParams.push('from=' + from)
     }
@@ -42,6 +46,14 @@ function buildUrl(baseEndpoint, from, to) {
     return endpoint
 }
 
+function trimTimestamp5m(ts) {
+    if (ts instanceof Date) {
+        ts = ts.getTime()
+    }
+    const minTimeFrame = 5 * 60 * 1000
+    return Math.floor(ts / minTimeFrame) * minTimeFrame
+}
+
 export default Chart.withErrorBoundary(function OhlcvtChartView({baseEndpoint, title, currency}) {
     const [from, setFrom] = useState(0)
     const [to, setTo] = useState(0)
@@ -50,7 +62,7 @@ export default Chart.withErrorBoundary(function OhlcvtChartView({baseEndpoint, t
     const loadCallbackRef = useRef()
     const {data, loaded} = useExplorerApi(buildUrl(baseEndpoint, from, to))
 
-    if (loaded) {
+    if (loaded && data instanceof Array) {
         //set navigator data for the entire market lifespan
         if (!navigatorData || navigatorData.baseEndpoint !== baseEndpoint) {
             setNavigatorData({baseEndpoint, data})
@@ -73,8 +85,10 @@ export default Chart.withErrorBoundary(function OhlcvtChartView({baseEndpoint, t
             chart.hideLoading()
             loadCallbackRef.current = null
         }
-        setFrom(Math.floor(min / 1000 / 3600) * 3600)
-        setTo(Math.round(max / 1000))
+        const from = trimTimestamp5m(min) / 1000
+        const to = trimTimestamp5m(max) / 1000
+        setFrom(from)
+        setTo(to)
     }, [])
 
 
@@ -96,7 +110,7 @@ export default Chart.withErrorBoundary(function OhlcvtChartView({baseEndpoint, t
             chart: {
                 events: {
                     load(e) {
-                        e.target.xAxis[0].setExtremes(new Date().getTime() - 30 * 24 * 60 * 60 * 1000)
+                        e.target.xAxis[0].setExtremes(trimTimestamp5m(new Date()) - 30 * 24 * 60 * 60 * 1000)
                     }
                 }
             },

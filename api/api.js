@@ -1,13 +1,15 @@
 (async function () {
+    const http = require('http')
+    const express = require('express')
+    const bodyParser = require('body-parser')
+
     process.env.TZ = 'Etc/UTC'
 
     await require('./connectors/mongodb-connector').init()
+    await require('./connectors/elastic-connector').enumerateIndexes()
+    const {port} = require('./app.config')
 
-    const {port} = require('./app.config'),
-        express = require('express'),
-        bodyParser = require('body-parser'),
-        http = require('http'),
-        proxyValidator = require('./business-logic/proxy-validator')
+    const proxyValidator = require('./business-logic/proxy-validator')
 
     const app = express()
     app.disable('x-powered-by')
@@ -30,19 +32,28 @@
     })
     //register API routes
     require('./api/routes/explorer-routes')(app)
-    require('./api/routes/relation-routes')(app)
     require('./api/routes/ticker-routes')(app)
     require('./api/routes/payments-routes')(app)
     require('./api/routes/directory-routes')(app)
     require('./api/routes/price-routes')(app)
     require('./api/routes/demolisher-routes')(app)
+    require('./api/routes/asset-list-routes')(app)
     require('./api/routes/server-info-routes')(app)
 
     // error handler
     app.use((err, req, res, next) => {
-        if (err && err.isBlockedByCors) return res.status(403).end()
-        if (err) console.error(err)
+        if (err?.isBlockedByCors)
+            return res.status(403).end()
+        if (err) {
+            console.error(err)
+        }
         res.status(500).end()
+    })
+
+    //404 handler
+    app.use((req, res, next) => {
+        res.header('Access-Control-Allow-Origin', '*')
+        res.status(404).send('API endpoint was not found')
     })
 
     const serverPort = parseInt(process.env.PORT || port || '3000')

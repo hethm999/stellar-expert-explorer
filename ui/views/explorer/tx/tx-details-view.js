@@ -8,9 +8,10 @@ import {
     TxOperationsList,
     parseTxDetails, withErrorBoundary
 } from '@stellar-expert/ui-framework'
-import {shortenString} from '@stellar-expert/formatter'
+import {formatWithAutoPrecision, fromStroops, shortenString} from '@stellar-expert/formatter'
 import appSettings from '../../../app-settings'
 import {resolvePath} from '../../../business-logic/path'
+import CrawlerScreen from '../../components/crawler-screen'
 import TxSignaturesView from './tx-signatures-view'
 import TxMemoView from './tx-memo-view'
 import TxHeaderView from './tx-header-view'
@@ -28,7 +29,8 @@ export default withErrorBoundary(function TxDetailsView({tx, embedded}) {
         result: tx.result,
         meta: tx.meta,
         createdAt: tx.ts,
-        context: {}
+        context: {},
+        protocol: tx.protocol
     })
     let feeSource
     let {tx: transaction} = parsedTx
@@ -41,6 +43,20 @@ export default withErrorBoundary(function TxDetailsView({tx, embedded}) {
     const source = transaction.source
     const memo = transaction.memo
     const feeEffect = parsedTx.effects.find(e => e.type === 'feeCharged')
+    let contractFee
+    const size = Buffer.from(tx.body, 'base64').length
+    const [firstOp] = transaction.operations
+    if (firstOp?.type === 'invokeHostFunction') {
+        let metrics = firstOp.effects.find(e => e.type === 'contractMetrics')
+        if (metrics) {
+            contractFee = metrics.fee
+            /*{
+                "nonrefundable": 475334,
+                "refundable": 205021,
+                "rent": 204981
+            }*/
+        }
+    }
     return <>
         <TxHeaderView tx={tx} embedded={embedded}/>
         <div className="segment blank">
@@ -85,6 +101,20 @@ export default withErrorBoundary(function TxDetailsView({tx, embedded}) {
                                 is incremented by 1.
                             </Info>
                         </dd>
+                        <dt>Transaction size:</dt>
+                        <dd>
+                            <BlockSelect inline className="condensed">{formatWithAutoPrecision(size)} bytes</BlockSelect>
+                            <Info
+                                link="https://www.stellar.org/developers/guides/concepts/transactions.html#sequence-number">
+                                <p>
+                                    Each transaction has a sequence number. For the transaction to be valid, the
+                                    sequence number must match the one stored in the source account entry when the
+                                    transaction is applied.
+                                </p>
+                                After the transaction is applied, the source account’s stored sequence number
+                                is incremented by 1.
+                            </Info>
+                        </dd>
                     </dl>
                 </div>
                 <div className="column column-50">
@@ -106,6 +136,9 @@ export default withErrorBoundary(function TxDetailsView({tx, embedded}) {
                         <dt>Fee Charged:</dt>
                         <dd>
                             <BlockSelect><Amount asset="XLM" amount={feeEffect.charged} adjust issuer={false}/></BlockSelect>
+                            {!!contractFee && <span class="dimmed text-tiny">
+                                &nbsp;({fromStroops(contractFee.nonrefundable)} non-refundable + {fromStroops(contractFee.refundable)} refundable + {fromStroops(100)} min op fee)
+                            </span>}
                             <Info link="https://www.stellar.org/developers/guides/concepts/transactions.html#fee">Actually
                                 charged fee which can be lower than the fee specified in the transaction. Each
                                 transaction sets a fee that is paid by the source account. The more operations in the
@@ -143,7 +176,7 @@ export default withErrorBoundary(function TxDetailsView({tx, embedded}) {
             <div className="segment blank space">
                 <TxOperationsList parsedTx={parsedTx}/>
             </div>
-            <TxSignaturesView parsedTx={parsedTx}/>
+            <CrawlerScreen><TxSignaturesView parsedTx={parsedTx}/></CrawlerScreen>
         </>}
     </>
 })
